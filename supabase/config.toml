@@ -1,0 +1,4 @@
+project_id = "niufelzjdbxdbgpqrmnb"
+
+[functions.osint-transform]
+verify_jwt = false
