@@ -154,6 +154,11 @@ const InvestigationSidebar = ({
                   </p>
                 </div>
               </div>
+              {selectedEntity.metadata?.thumbnail && (
+                <div className="mb-3 rounded overflow-hidden border border-border/50 shadow-lg">
+                  <img src={selectedEntity.metadata.thumbnail} alt="preview" className="w-full aspect-video object-cover" />
+                </div>
+              )}
               <Button
                 onClick={() => onRunTransform(selectedEntity)}
                 disabled={isTransforming}
@@ -163,15 +168,32 @@ const InvestigationSidebar = ({
                 <Zap className="h-3 w-3" />
                 {isTransforming ? 'TRANSFORMING...' : 'RUN TRANSFORMS'}
               </Button>
+              {selectedEntity.metadata?.nextPageToken && (
+                <Button
+                  onClick={() => onRunTransform({
+                    ...selectedEntity,
+                    metadata: { ...selectedEntity.metadata, pageToken: selectedEntity.metadata.nextPageToken }
+                  })}
+                  disabled={isTransforming}
+                  size="sm"
+                  variant="outline"
+                  className="w-full h-7 text-[10px] font-mono gap-1.5 mt-2 border-primary/30 text-primary hover:bg-primary/10"
+                >
+                  <Download className="h-3 w-3" /> LOAD NEXT PAGE
+                </Button>
+              )}
               {selectedEntity.metadata && Object.keys(selectedEntity.metadata).length > 0 && (
                 <div className="mt-2 pt-2 border-t border-border space-y-1 max-h-64 overflow-y-auto">
                   <p className="text-[9px] font-mono text-primary tracking-wider mb-1">▸ METADATA</p>
-                  {Object.entries(selectedEntity.metadata).map(([k, v]) => (
-                    <div key={k} className="text-[10px] font-mono leading-tight">
-                      <span className="text-muted-foreground">{k}:</span>{' '}
-                      <span className="text-foreground break-all">{String(v).slice(0, 200)}</span>
-                    </div>
-                  ))}
+                  {Object.entries(selectedEntity.metadata).map(([k, v]) => {
+                    if (k === 'thumbnail' || k === 'nextPageToken') return null;
+                    return (
+                      <div key={k} className="text-[10px] font-mono leading-tight">
+                        <span className="text-muted-foreground">{k}:</span>{' '}
+                        <span className="text-foreground break-all">{String(v).slice(0, 200)}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

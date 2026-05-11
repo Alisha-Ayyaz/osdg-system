@@ -61,7 +61,7 @@ export interface StageEvent {
 export interface StreamEvents {
   onPlan?: (stages: string[]) => void;
   onStage?: (event: StageEvent) => void;
-  onPartial?: (partial: { name: string; entities: OsintEntity[]; relations: OsintRelation[] }) => void;
+  onPartial?: (partial: { name: string; entities: OsintEntity[]; relations: OsintRelation[]; warning?: string }) => void;
 }
 
 const RATE_LIMIT_PATTERNS = [
@@ -145,7 +145,7 @@ export async function runTransform(
             const rels = (evt.relations ?? []) as OsintRelation[];
             entities.push(...ents);
             relations.push(...rels);
-            events?.onPartial?.({ name: evt.name, entities: ents, relations: rels });
+            events?.onPartial?.({ name: evt.name, entities: ents, relations: rels, warning: evt.warning });
             events?.onStage?.({
               name: evt.name,
               status: evt.status as StageStatus,

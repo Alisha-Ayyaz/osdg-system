@@ -29,6 +29,7 @@ const Index = () => {
   const [progressStages, setProgressStages] = useState<ProgressStage[]>([]);
   const [progressEntity, setProgressEntity] = useState<string | undefined>();
   const actionTimeout = useRef<ReturnType<typeof setTimeout>>();
+  const transformCache = useRef<Map<string, { entities: OsintEntity[], relations: OsintRelation[] }>>(new Map());
   const { toast } = useToast();
   const { signOut } = useAuth();
   const {
@@ -130,6 +131,41 @@ const Index = () => {
 
   const streamTransform = useCallback(
     async (entity: OsintEntity, sourcePos: { x: number; y: number }) => {
+      // 1. Check Session Cache
+      const cacheKey = `${entity.type}:${entity.label.toLowerCase()}`;
+      if (transformCache.current.has(cacheKey)) {
+        const cached = transformCache.current.get(cacheKey)!;
+        toast({ title: 'Using Cached Results', description: `Retrieved ${cached.entities.length} subdomains from session memory.` });
+        
+        // Use local batch placement
+        let placed = 0;
+        const radius = 240;
+        const newNodes: Node[] = cached.entities.map((e, i) => {
+          const idx = placed + i;
+          const angle = idx * 0.55 - Math.PI / 2;
+          const r = radius + Math.floor(idx / 12) * 60;
+          return {
+            id: e.id,
+            type: 'entity',
+            position: { x: sourcePos.x + r * Math.cos(angle), y: sourcePos.y + r * Math.sin(angle) },
+            data: { label: e.label, entityType: e.type, platform: e.platform, metadata: e.metadata },
+          };
+        });
+        const newEdges: Edge[] = cached.relations.map((r) => ({
+          id: r.id,
+          source: r.sourceId,
+          target: r.targetId,
+          label: r.label,
+          animated: true,
+          style: { stroke: ENTITY_COLORS[entity.type] + '88' },
+        }));
+        
+        setNodes((nds) => [...nds, ...newNodes]);
+        setEdges((eds) => [...eds, ...newEdges]);
+        setAllEntities((prev) => [...prev, ...cached.entities]);
+        return;
+      }
+
       setIsTransforming(true);
       setProgressEntity(entity.label);
       setProgressStages([]);
@@ -139,13 +175,13 @@ const Index = () => {
 
       let placed = 0;
       const collectedEntities: OsintEntity[] = [];
+      const collectedRelations: OsintRelation[] = [];
 
       const placeBatch = (ents: OsintEntity[], rels: OsintRelation[]) => {
         if (ents.length === 0 && rels.length === 0) return;
         const radius = 240;
         const newNodes: Node[] = ents.map((e, i) => {
           const idx = placed + i;
-          // Spiral so concurrent batches don't overlap
           const angle = idx * 0.55 - Math.PI / 2;
           const r = radius + Math.floor(idx / 12) * 60;
           return {
@@ -178,6 +214,7 @@ const Index = () => {
         setNodes((nds) => [...nds, ...newNodes]);
         setEdges((eds) => [...eds, ...newEdges]);
         collectedEntities.push(...ents);
+        collectedRelations.push(...rels);
       };
 
       const result = await runTransform(entity, {
@@ -193,10 +230,25 @@ const Index = () => {
             return next;
           });
         },
-        onPartial: ({ entities: ents, relations: rels }) => {
+        onPartial: ({ entities: ents, relations: rels, warning: stageWarning }) => {
           placeBatch(ents, rels);
+          if (stageWarning) {
+            toast({ 
+              title: "Intelligence Update", 
+              description: stageWarning,
+              duration: 4000 
+            });
+          }
         },
       });
+
+      // 2. Save to Session Cache
+      if (collectedEntities.length > 0) {
+        transformCache.current.set(cacheKey, { 
+          entities: collectedEntities, 
+          relations: collectedRelations 
+        });
+      }
 
       setNodes((nds) =>
         nds.map((n) => (n.id === entity.id ? { ...n, data: { ...n.data, isLoading: false } } : n))
@@ -210,7 +262,7 @@ const Index = () => {
       // Auto-hide progress shortly after completion
       setTimeout(() => setProgressStages([]), 2500);
     },
-    [setNodes, setEdges, toast]
+    [setNodes, setEdges, toast, setAllEntities]
   );
 
   const handleTransform = useCallback(
