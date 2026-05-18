@@ -695,6 +695,13 @@ async function checkReddit(out: R, srcId: string, username: string) {
 
 // Twitter/X — official v2 API via Bearer token (falls back to Nitter scrape if no token).
 async function checkTwitter(out: R, srcId: string, username: string) {
+  // 1. Try Python Scraper Service first
+  const scraperUrl = getEnv("PYTHON_SCRAPER_URL");
+  if (scraperUrl) {
+    const success = await socialSvc.checkPythonScraper(getContext(out), { id: srcId, type: "twitter_profile", platform: "twitter", label: username });
+    if (success) return;
+  }
+
   const bearer = getEnv("TWITTER_BEARER_TOKEN");
   if (bearer) {
     const u = await safeJson(
