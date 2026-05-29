@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 import redis.asyncio as redis
 from contextlib import asynccontextmanager
 
-from models import TransformRequest, TransformResponse, AccountRequest
+from models import TransformRequest, TransformResponse
 from scrapers.twitter import scrape_twitter
 from scrapers.linkedin import scrape_linkedin
 from scrapers.facebook import scrape_facebook
@@ -65,22 +65,48 @@ async def transform_endpoint(request: TransformRequest, api_key: str = Depends(g
     response = None
     
     try:
-        # Very basic routing based on platform or entityType
+        import asyncio
         platform = request.platform.lower() if request.platform else ""
+        entity_type = request.entityType.lower() if request.entityType else ""
         
-        if platform == "twitter" or "twitter" in request.entityType:
-            response = await scrape_twitter(request)
-        elif platform == "linkedin" or "linkedin" in request.entityType:
-            response = await scrape_linkedin(request)
-        elif platform == "facebook" or "facebook" in request.entityType:
-            response = await scrape_facebook(request)
-        elif platform == "instagram" or "instagram" in request.entityType:
-            response = await scrape_instagram(request)
-        elif platform == "google" or request.entityType == "web_search":
-            response = await scrape_google(request)
+        if entity_type == "person" and (platform == "" or platform == "all"):
+            # Run all concurrently
+            results = await asyncio.gather(
+                scrape_twitter(request),
+                scrape_linkedin(request),
+                scrape_instagram(request),
+                scrape_facebook(request),
+                scrape_google(request),
+                return_exceptions=True
+            )
+            
+            response = TransformResponse(
+                success=True,
+                source="all",
+                entities=[],
+                relations=[],
+                rawData={}
+            )
+            
+            for res in results:
+                if isinstance(res, TransformResponse) and res.success:
+                    response.entities.extend(res.entities)
+                    response.relations.extend(res.relations)
+                elif isinstance(res, Exception):
+                    print(f"Scraper error: {res}")
         else:
-            # Default to Google search if platform is not explicitly matched
-            response = await scrape_google(request)
+            if platform == "twitter" or "twitter" in entity_type:
+                response = await scrape_twitter(request)
+            elif platform == "linkedin" or "linkedin" in entity_type:
+                response = await scrape_linkedin(request)
+            elif platform == "facebook" or "facebook" in entity_type:
+                response = await scrape_facebook(request)
+            elif platform == "instagram" or "instagram" in entity_type:
+                response = await scrape_instagram(request)
+            elif platform == "google" or entity_type == "web_search":
+                response = await scrape_google(request)
+            else:
+                response = await scrape_google(request)
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal scraper error: {str(e)}")
@@ -99,15 +125,6 @@ async def transform_endpoint(request: TransformRequest, api_key: str = Depends(g
 
     return response
 
-@app.post("/api/twitter/accounts", summary="Add a Twitter account to twscrape")
-async def add_twitter_account(account: AccountRequest, api_key: str = Depends(get_api_key)):
-    try:
-        from scrapers.twitter import api
-        await api.pool.add_account(account.username, account.password, account.email, account.email_password)
-        await api.pool.login_all()
-        return {"success": True, "message": f"Account {account.username} added and logged in successfully"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
 async def health_check():

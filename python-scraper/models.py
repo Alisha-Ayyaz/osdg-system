@@ -29,8 +29,3 @@ class TransformResponse(BaseModel):
     rawData: Dict[str, Any] = Field(default_factory=dict)
     error: Optional[str] = None
 
-class AccountRequest(BaseModel):
-    username: str
-    password: str
-    email: str
-    email_password: str

@@ -1,9 +1,12 @@
 import uuid
-from playwright.async_api import async_playwright
+import time
+import asyncio
+import undetected_chromedriver as uc
+from bs4 import BeautifulSoup
 from utils.proxy_manager import proxy_manager
 from models import TransformRequest, TransformResponse, OsintEntity, OsintRelation
 
-async def scrape_google(request: TransformRequest) -> TransformResponse:
+def sync_scrape_google(request: TransformRequest) -> TransformResponse:
     query = request.value
     url = f"https://www.google.com/search?q={query}"
     
@@ -14,49 +17,53 @@ async def scrape_google(request: TransformRequest) -> TransformResponse:
         relations=[]
     )
     
-    proxy_settings = proxy_manager.get_proxy()
+    options = uc.ChromeOptions()
+    options.add_argument("--headless=new")
+    options.add_argument("--disable-gpu")
     
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=True,
-            proxy=proxy_settings
+    proxy_settings = proxy_manager.get_proxy()
+    if proxy_settings:
+        if isinstance(proxy_settings, dict) and 'server' in proxy_settings:
+            options.add_argument(f"--proxy-server={proxy_settings['server']}")
+        elif isinstance(proxy_settings, str):
+            options.add_argument(f"--proxy-server={proxy_settings}")
+            
+    driver = None
+    try:
+        driver = uc.Chrome(options=options)
+        driver.set_page_load_timeout(30)
+        driver.get(url)
+        
+        # Hydration wait
+        time.sleep(1.5)
+        html = driver.page_source
+        
+        soup = BeautifulSoup(html, "html.parser")
+        
+        search_id = str(uuid.uuid4())
+        search_entity = OsintEntity(
+            id=search_id,
+            type="web_search",
+            label=f"Search: {query}",
+            metadata={"query": query}
         )
+        response.entities.append(search_entity)
         
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        )
-        
-        page = await context.new_page()
-        
-        try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            
-            # Simple extraction of top 3 search results
-            results = await page.locator("div.g").all()
-            
-            # Create a main web search entity
-            search_id = str(uuid.uuid4())
-            search_entity = OsintEntity(
-                id=search_id,
-                type="web_search",
-                label=f"Search: {query}",
-                metadata={"query": query}
-            )
-            response.entities.append(search_entity)
-            
-            for index, result in enumerate(results[:3]):
-                title_el = result.locator("h3")
-                link_el = result.locator("a")
+        results = soup.select("div.g")
+        for index, result in enumerate(results[:3]):
+            try:
+                title_el = result.select_one("h3")
+                link_el = result.select_one("a")
                 
-                if await title_el.count() > 0 and await link_el.count() > 0:
-                    title = await title_el.first.inner_text()
-                    link = await link_el.first.get_attribute("href")
+                if title_el and link_el:
+                    title = title_el.get_text(strip=True)
+                    link = link_el.get("href")
                     
                     if title and link:
                         result_id = str(uuid.uuid4())
                         result_entity = OsintEntity(
                             id=result_id,
-                            type="domain", # Broadly categorizing as domain/website
+                            type="domain",
                             label=title[:30] + "...",
                             metadata={"url": link, "title": title}
                         )
@@ -68,12 +75,17 @@ async def scrape_google(request: TransformRequest) -> TransformResponse:
                             targetId=result_id,
                             label="result"
                         ))
-            
-            response.success = True
-            
-        except Exception as e:
-            response.error = str(e)
-        finally:
-            await browser.close()
+            except Exception:
+                continue
+                
+        response.success = True
+    except Exception as e:
+        response.error = str(e)
+    finally:
+        if driver:
+            driver.quit()
             
     return response
+
+async def scrape_google(request: TransformRequest) -> TransformResponse:
+    return await asyncio.to_thread(sync_scrape_google, request)
